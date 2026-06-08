@@ -1,0 +1,5 @@
+pyvisa>=1.13            # PyVISA talks to Keysight IO Libraries Suite (GPIB)
+numpy>=1.24
+matplotlib>=3.7
+pandas>=2.0
+openpyxl>=3.1           # for Excel (.xlsx) export
