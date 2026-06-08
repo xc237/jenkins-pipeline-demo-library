@@ -28,7 +28,6 @@ import argparse
 import csv
 import datetime
 import os
-import sys
 import time
 
 import matplotlib.pyplot as plt
@@ -101,7 +100,9 @@ class B1500Controller:
             return
         if not PYVISA_AVAILABLE:
             raise ImportError(
-                "pyvisa is not installed. Run: pip install pyvisa pyvisa-py"
+                "pyvisa is not installed. Run: pip install pyvisa\n"
+                "Also ensure Keysight IO Libraries Suite is installed "
+                "to provide the VISA backend."
             )
         rm = pyvisa.ResourceManager()
         self._instrument = rm.open_resource(self.visa_address)
@@ -202,29 +203,29 @@ class B1500Controller:
             return voltages, currents
 
         # ---- real hardware path ----
-        # Measurement mode 2 = staircase sweep, on drain channel
-        self.write(f"MM 2,{CHANNEL_DRAIN}")
+        # Measurement mode 2 = staircase sweep, on Terminal+ channel
+        self.write(f"MM 2,{CHANNEL_PLUS}")
 
-        # WV chNum, mode, startV, stopV, step, iComp
-        #   mode 1 = linear staircase
+        # WV chNum, mode, startV, stopV, steps, iComp
+        #   mode 1 = linear staircase; steps = number of measurement points
         self.write(
-            f"WV {CHANNEL_DRAIN},1,"
+            f"WV {CHANNEL_PLUS},1,"
             f"{v_start},{v_stop},{n_points},{COMPLIANCE_I}"
         )
 
         # Hold / delay times (WT hold, delay, step_delay, trigger_delay, measure_delay)
         self.write(f"WT {HOLD_TIME},{STEP_DELAY}")
 
-        # CMM: current measurement on drain channel
-        self.write(f"CMM {CHANNEL_DRAIN},1")   # 1 = compliance-side I
+        # CMM: current measurement on Terminal+ channel
+        self.write(f"CMM {CHANNEL_PLUS},1")   # 1 = compliance-side I
 
         # Execute sweep
         self.write("XE")
-        # Wait for completion (poll status byte or use *OPC?)
+        # Wait for completion
         self._instrument.query("*OPC?")        # blocks until done
 
-        # Read raw ASCII data
-        raw = self._instrument.read()
+        # Read collected data using RCV command
+        raw = self.query("RCV")
         self._check_error()
 
         # Parse: B1500 returns comma-separated status+value tokens
@@ -494,23 +495,23 @@ def run_iv_measurement(
     b1500 = B1500Controller(visa_address, simulate=simulate)
     tc    = TemperatureController(temp_address, temp_cmd, simulate=simulate)
 
-    b1500.connect()
-    b1500.reset()
-    b1500.initialise_channels()
-    tc.connect()
-
-    print(
-        f"\n{'='*60}\n"
-        f"  Temperature-dependent IV measurement\n"
-        f"  Sample    : {sample_name}\n"
-        f"  Cycles    : {'∞ (Ctrl-C to stop)' if cycles == 0 else cycles}\n"
-        f"  Interval  : {interval_min} min\n"
-        f"  Output    : {output_dir}/\n"
-        f"{'='*60}\n"
-    )
-
     cycle_num = 0
     try:
+        b1500.connect()
+        b1500.reset()
+        b1500.initialise_channels()
+        tc.connect()
+
+        print(
+            f"\n{'='*60}\n"
+            f"  Temperature-dependent IV measurement\n"
+            f"  Sample    : {sample_name}\n"
+            f"  Cycles    : {'∞ (Ctrl-C to stop)' if cycles == 0 else cycles}\n"
+            f"  Interval  : {interval_min} min\n"
+            f"  Output    : {output_dir}/\n"
+            f"{'='*60}\n"
+        )
+
         while True:
             cycle_num += 1
             if cycles > 0 and cycle_num > cycles:

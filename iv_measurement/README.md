@@ -82,9 +82,24 @@ Read temperature → IV sweep → Save CSV / XLSX / PNG → Wait → Repeat
 
 ## Installation
 
+It is best practice to install Python dependencies inside a **virtual environment** rather than globally, so project packages don't conflict with your system Python or other projects.
+
 ```bash
+# 1. Create a virtual environment (one-time setup)
+python -m venv .venv
+
+# 2. Activate it
+#    Windows
+.venv\Scripts\activate
+#    macOS / Linux
+source .venv/bin/activate
+
+# 3. Install dependencies into the venv
 pip install -r requirements.txt
 ```
+
+> After activation your shell prompt shows `(.venv)` — all `python` and `pip` commands now operate inside the isolated environment.  
+> To deactivate when you're done: run `deactivate`.
 
 **What each package does:**
 

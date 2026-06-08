@@ -1,0 +1,11 @@
+# Python virtual environment
+.venv/
+venv/
+env/
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Measurement output files
+iv_results/
