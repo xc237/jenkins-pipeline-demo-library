@@ -80,21 +80,35 @@ Read temperature → IV sweep → Save CSV / XLSX / PNG → Wait → Repeat
 
 ---
 
-## Installation
+## Installation (Windows)
+
+> **This script is designed to run on Windows.** The instructions below use Windows Command Prompt (`cmd`) and PowerShell. Run all commands from the `iv_measurement\` folder.
 
 It is best practice to install Python dependencies inside a **virtual environment** rather than globally, so project packages don't conflict with your system Python or other projects.
 
-```bash
+**Command Prompt (cmd)**
+```cmd
+:: 1. Create a virtual environment (one-time setup)
+python -m venv .venv
+
+:: 2. Activate it
+.venv\Scripts\activate.bat
+
+:: 3. Install dependencies
+pip install -r requirements.txt
+```
+
+**PowerShell**
+```powershell
 # 1. Create a virtual environment (one-time setup)
 python -m venv .venv
 
 # 2. Activate it
-#    Windows
-.venv\Scripts\activate
-#    macOS / Linux
-source .venv/bin/activate
+# Note: if you get an execution-policy error, first run:
+#   Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+.venv\Scripts\Activate.ps1
 
-# 3. Install dependencies into the venv
+# 3. Install dependencies
 pip install -r requirements.txt
 ```
 
@@ -133,28 +147,13 @@ pip install -r requirements.txt
 
 ---
 
-## Running a measurement
+## Running a measurement (Windows)
 
-### Real hardware – run indefinitely (Ctrl-C to stop)
-```bash
-python b1500_iv.py \
-    --visa      "GPIB1::17::INSTR" \
-    --temp-visa "GPIB0::12::INSTR" \
-    --temp-cmd  "KRDG? A" \
-    --sample    "Diode_A1"
-```
+> All examples below are for **Windows**. Run them from the `iv_measurement\` folder with the virtual environment active (prompt shows `(.venv)`).  
+> **Line-continuation character:** `^` in Command Prompt, `` ` `` in PowerShell.
 
-### Real hardware – run a fixed number of cycles
-```bash
-python b1500_iv.py --sample "Diode_A1" --cycles 5 --interval 10
-```
+### All CLI options and their defaults
 
-### Simulation (no instruments required)
-```bash
-python b1500_iv.py --simulate --sample "Test" --cycles 3 --interval 1
-```
-
-### All CLI options
 | Option          | Default              | Description                                  |
 |-----------------|----------------------|----------------------------------------------|
 | `--visa`        | `GPIB1::17::INSTR`   | B1500A VISA address                          |
@@ -163,8 +162,109 @@ python b1500_iv.py --simulate --sample "Test" --cycles 3 --interval 1
 | `--sample`      | `DUT`                | Device name (used in file names)             |
 | `--cycles`      | `0` (infinite)       | Number of IV cycles; 0 = run until Ctrl-C   |
 | `--interval`    | `10`                 | Minutes between cycles                       |
-| `--output-dir`  | `iv_results`         | Output directory                             |
-| `--simulate`    | off                  | Synthetic data mode, no hardware needed      |
+| `--output-dir`  | `iv_results`         | Output directory for CSV / XLSX / PNG files  |
+| `--simulate`    | off (flag)           | Synthetic data mode, no hardware needed      |
+
+---
+
+### 1 — Minimal call (all defaults)
+
+Omitting every argument uses the defaults shown in the table above:  
+B1500A at `GPIB1::17::INSTR`, temperature controller at `GPIB0::12::INSTR`,  
+sample name `DUT`, 10-minute interval, infinite cycles, output to `iv_results\`.
+
+**Command Prompt**
+```cmd
+python b1500_iv.py
+```
+
+**PowerShell**
+```powershell
+python b1500_iv.py
+```
+
+---
+
+### 2 — Real hardware, custom addresses and sample name, run indefinitely
+
+Supply the GPIB addresses that match your bench setup. Press **Ctrl-C** to stop.
+
+**Command Prompt**
+```cmd
+python b1500_iv.py ^
+    --visa      "GPIB1::17::INSTR" ^
+    --temp-visa "GPIB0::12::INSTR" ^
+    --temp-cmd  "KRDG? A" ^
+    --sample    "Diode_A1"
+```
+
+**PowerShell**
+```powershell
+python b1500_iv.py `
+    --visa      "GPIB1::17::INSTR" `
+    --temp-visa "GPIB0::12::INSTR" `
+    --temp-cmd  "KRDG? A" `
+    --sample    "Diode_A1"
+```
+
+> `--cycles` is omitted → defaults to `0` (infinite).  
+> `--interval` is omitted → defaults to `10` minutes between cycles.  
+> `--output-dir` is omitted → files are saved to `iv_results\`.
+
+---
+
+### 3 — Real hardware, fixed number of cycles with custom interval
+
+**Command Prompt**
+```cmd
+python b1500_iv.py --sample "Diode_A1" --cycles 5 --interval 10
+```
+
+**PowerShell**
+```powershell
+python b1500_iv.py --sample "Diode_A1" --cycles 5 --interval 10
+```
+
+> `--cycles 5` → stops automatically after 5 IV sweeps.  
+> `--interval 10` → 10 minutes between each sweep (same as the default, shown explicitly for clarity).  
+> `--visa` / `--temp-visa` omitted → uses default GPIB addresses.
+
+---
+
+### 4 — Real hardware, custom output directory
+
+**Command Prompt**
+```cmd
+python b1500_iv.py --sample "Diode_A1" --output-dir "C:\Data\RunA"
+```
+
+**PowerShell**
+```powershell
+python b1500_iv.py --sample "Diode_A1" --output-dir "C:\Data\RunA"
+```
+
+> All CSV / XLSX / PNG files for this run are written to `C:\Data\RunA\`.
+
+---
+
+### 5 — Simulation mode (no instruments required)
+
+Use this to verify the full pipeline (file writing, plots) without any hardware connected.
+
+**Command Prompt**
+```cmd
+python b1500_iv.py --simulate --sample "Test" --cycles 3 --interval 1
+```
+
+**PowerShell**
+```powershell
+python b1500_iv.py --simulate --sample "Test" --cycles 3 --interval 1
+```
+
+> `--simulate` → generates a synthetic diode IV curve with slow temperature drift (300 K → 77 K). No GPIB connection is attempted.  
+> `--cycles 3` → runs exactly 3 cycles then exits.  
+> `--interval 1` → only 1 minute between cycles, so the test completes quickly.  
+> All three output files (CSV, XLSX, PNG) are still written exactly as in real mode.
 
 ---
 
