@@ -51,10 +51,11 @@ except ImportError:
 DEFAULT_VISA_ADDRESS  = "GPIB1::17::INSTR"   # Keysight GPIB cable, board 1, address 17
 
 # Temperature controller (change address and query command to match your model)
-# Lakeshore 331/335/336 example: GPIB0::12::INSTR, query = "KRDG? A"
-# Oxford ITC example:            GPIB0::24::INSTR, query = "R1"
+# Blueforse (default):               GPIB0::12::INSTR, query = "KRDG? A"
+# Lakeshore 331/335/336 example:     GPIB0::12::INSTR, query = "KRDG? A"
+# Oxford ITC example:                GPIB0::24::INSTR, query = "R1"
 DEFAULT_TEMP_ADDRESS  = "GPIB0::12::INSTR"
-DEFAULT_TEMP_CMD      = "KRDG? A"   # Lakeshore: read Channel-A temperature (Kelvin)
+DEFAULT_TEMP_CMD      = "KRDG? A"   # Blueforse / Lakeshore: read Channel-A temperature (Kelvin)
 
 CHANNEL_PLUS  = 1   # SMU1 – Terminal+ (force voltage, measure current)
 CHANNEL_MINUS = 2   # SMU2 – Terminal− (grounded reference)

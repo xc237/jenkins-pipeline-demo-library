@@ -18,7 +18,7 @@ Read temperature → IV sweep → Save CSV / XLSX / PNG → Wait → Repeat
 | SMU1 Terminal+| B1500A SMU1         | Channel 1 – force V, measure I |
 | SMU2 Terminal−| B1500A SMU2         | Channel 2 – grounded reference |
 | B1500A        | Keysight B1500A     | `GPIB1::17::INSTR`      |
-| Temp. ctrl.   | e.g. Lakeshore 331  | `GPIB0::12::INSTR`      |
+| Temp. ctrl.   | Blueforse           | `GPIB0::12::INSTR`      |
 
 - Connect the PC to both instruments with **Keysight GPIB cables**.  
 - Install **Keysight IO Libraries Suite** – this provides the VISA backend.  
@@ -89,8 +89,11 @@ python b1500_iv.py --simulate --sample "Test" --cycles 3 --interval 1
 
 ## Temperature controller query commands
 
+The temperature controller used in this setup is from **Blueforse**.
+
 | Model            | `--temp-cmd`   | Notes                         |
 |------------------|----------------|-------------------------------|
+| Blueforse        | `KRDG? A`      | Channel A in Kelvin           |
 | Lakeshore 331/335/336 | `KRDG? A` | Channel A in Kelvin           |
 | Lakeshore 340    | `KRDG? A`      | Same syntax                   |
 | Oxford ITC 503   | `R1`           | Sensor 1 temperature          |
