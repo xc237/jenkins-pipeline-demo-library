@@ -171,7 +171,7 @@ pip install -r requirements.txt
 
 Omitting every argument uses the defaults shown in the table above:  
 B1500A at `GPIB1::17::INSTR`, temperature controller at `GPIB0::12::INSTR`,  
-sample name `DUT`, 10-minute interval, infinite cycles, output to `iv_results\`.
+sample name `DUT`, 10-minute interval, infinite cycles, output to `iv_results`.
 
 **Command Prompt**
 ```cmd
@@ -209,7 +209,7 @@ python b1500_iv.py `
 
 > `--cycles` is omitted → defaults to `0` (infinite).  
 > `--interval` is omitted → defaults to `10` minutes between cycles.  
-> `--output-dir` is omitted → files are saved to `iv_results\`.
+> `--output-dir` is omitted → files are saved to `iv_results`.
 
 ---
 
@@ -284,7 +284,7 @@ The temperature controller used in this setup is from **Blueforse**.
 
 ## Output files
 
-All files are written to `iv_results/` (or `--output-dir`).  
+All files are written to `iv_results` (or `--output-dir`).  
 Each cycle produces three files tagged with cycle number and temperature:
 
 ```

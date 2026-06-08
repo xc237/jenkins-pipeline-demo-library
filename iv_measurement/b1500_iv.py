@@ -213,7 +213,9 @@ class B1500Controller:
             f"{v_start},{v_stop},{n_points},{COMPLIANCE_I}"
         )
 
-        # Hold / delay times (WT hold, delay, step_delay, trigger_delay, measure_delay)
+        # Hold / delay times (WT hold, delay)
+        #   hold  – seconds to wait after XE before the first step
+        #   delay – seconds to wait at each step before measuring
         self.write(f"WT {HOLD_TIME},{STEP_DELAY}")
 
         # CMM: current measurement on Terminal+ channel
@@ -508,7 +510,7 @@ def run_iv_measurement(
             f"  Sample    : {sample_name}\n"
             f"  Cycles    : {'∞ (Ctrl-C to stop)' if cycles == 0 else cycles}\n"
             f"  Interval  : {interval_min} min\n"
-            f"  Output    : {output_dir}/\n"
+            f"  Output    : {output_dir}\n"
             f"{'='*60}\n"
         )
 
@@ -579,7 +581,7 @@ def run_iv_measurement(
         tc.disconnect()
 
     print(f"\n[DONE] {cycle_num} cycle(s) completed. "
-          f"All files saved in: {output_dir}/")
+          f"All files saved in: {output_dir}")
 
 
 def _interruptible_sleep(seconds: float, tick: float = 5.0):
