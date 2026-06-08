@@ -2,11 +2,12 @@
 B1500 Semiconductor Parameter Analyzer – IV Measurement Script
 ================================================================
 Hardware:  Keysight B1500A
+Device:    2-terminal (e.g. diode, resistor, memristor)
 Interface: GPIB via Keysight IO Libraries Suite (GPIB1::17::INSTR)
-Setup:     SMU1 (Channel 1) → Drain
-           SMU2 (Channel 2) → Source (grounded)
+Setup:     SMU1 (Channel 1) → Terminal+ (force voltage, measure current)
+           SMU2 (Channel 2) → Terminal− (grounded reference)
 
-Sweep:     Drain voltage  -0.5 V → +0.5 V, step 0.01 V (101 points)
+Sweep:     Terminal voltage  -0.5 V → +0.5 V, step 0.01 V (101 points)
 Output:    • Matplotlib IV plot (PNG)
            • CSV data file (importable by Origin, Excel, …)
            • Excel workbook (.xlsx)
@@ -48,8 +49,8 @@ except ImportError:
 # Constants
 # ---------------------------------------------------------------------------
 DEFAULT_VISA_ADDRESS = "GPIB1::17::INSTR"   # Keysight GPIB cable, board 1, address 17
-CHANNEL_DRAIN  = 1   # SMU1 – drain
-CHANNEL_SOURCE = 2   # SMU2 – source (forced to 0 V)
+CHANNEL_PLUS  = 1   # SMU1 – Terminal+ (force voltage, measure current)
+CHANNEL_MINUS = 2   # SMU2 – Terminal− (grounded reference)
 
 V_START        = -0.5    # V
 V_STOP         =  0.5    # V
@@ -135,18 +136,18 @@ class B1500Controller:
         time.sleep(2)
 
     def initialise_channels(self):
-        """Enable drain (CH1) and source (CH2) channels."""
+        """Enable Terminal+ (CH1) and Terminal− (CH2) channels."""
         # CN – connect (power on) channels
-        self.write(f"CN {CHANNEL_DRAIN},{CHANNEL_SOURCE}")
+        self.write(f"CN {CHANNEL_PLUS},{CHANNEL_MINUS}")
 
         # Set integration time  (AIT: auto-integration, 2=MED)
         mode_map = {"SHORT": 1, "MED": 2, "LONG": 3}
         n = mode_map.get(INTEGRATION_TIME, 2)
         self.write(f"AIT 2,{n}")        # AIT type,mode
 
-        # Source channel: force 0 V (ground the source)
+        # Terminal− channel: force 0 V (grounded reference)
         # DV chNum, vRange, voltage, iComp
-        self.write(f"DV {CHANNEL_SOURCE},0,0,{COMPLIANCE_I}")
+        self.write(f"DV {CHANNEL_MINUS},0,0,{COMPLIANCE_I}")
 
         # Output data format: ASCII, one value per line
         self.write("FMT 1,1")
