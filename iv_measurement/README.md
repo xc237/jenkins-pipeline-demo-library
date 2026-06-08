@@ -4,6 +4,59 @@ Automated temperature-dependent drain-to-source IV sweep using the
 Keysight B1500A Semiconductor Parameter Analyzer over GPIB, with a
 temperature controller read at every cycle.
 
+---
+
+## What this script does
+
+`b1500_iv.py` runs a fully automated, repeating measurement loop designed for
+studying how a device's current–voltage (IV) characteristic changes with
+temperature (for example during a cryostat cool-down or warm-up).
+
+**Step-by-step loop (repeats every 10 minutes by default)**
+
+```
+1. Read temperature  ──► query Blueforse controller via GPIB → get value in Kelvin
+2. IV sweep          ──► B1500A forces V from −0.5 V to +0.5 V in 101 steps
+                         at each step it measures the resulting current (SMU1)
+                         while SMU2 holds Terminal− at 0 V (grounded reference)
+3. Save outputs      ──► three files written per cycle (CSV, XLSX, PNG)
+                         file names are tagged with cycle number, temperature,
+                         and a datetime stamp so each cycle is uniquely identified
+4. Wait interval     ──► script sleeps for the configured interval (default 10 min)
+5. Repeat            ──► goes back to step 1 for the next cycle
+                         runs indefinitely (Ctrl-C to stop) or for a fixed number
+                         of cycles when --cycles N is passed
+```
+
+**What "IV sweep" means physically**  
+SMU1 (Channel 1) is connected to the positive terminal of the device under test.  
+It ramps the voltage from −0.5 V to +0.5 V in 101 equal steps (step size 0.01 V)  
+and measures the current flowing through the device at each voltage step.  
+SMU2 (Channel 2) is connected to the negative terminal and is held at 0 V,  
+acting as the grounded reference.  
+The result is an IV curve: current (in amps, converted to mA for display) as a  
+function of applied voltage.
+
+**VISA / driver architecture (two layers)**  
+There are two separate components needed to talk to the hardware:
+
+| Layer | What it is | How it is installed |
+|---|---|---|
+| Keysight IO Libraries Suite | Low-level VISA backend — the driver DLL that communicates with the GPIB hardware | Download and install from Keysight's website |
+| `pyvisa` (Python package) | Python wrapper that calls into the Keysight VISA backend | `pip install pyvisa` via `requirements.txt` |
+
+Both are required. IO Libraries Suite alone gives no Python API. `pyvisa` alone
+(without a backend) raises `VisaIOError: Cannot find any VISA implementation`.
+
+**Simulation mode**  
+Pass `--simulate` to run without any hardware. The script generates a synthetic
+diode-like IV curve (exponential model with small Gaussian noise) and a
+temperature that drifts slowly from 300 K down to 77 K. All three output files
+are still written exactly as in real mode, so you can test the full pipeline
+offline.
+
+---
+
 **Workflow (repeats every 10 minutes by default)**
 ```
 Read temperature → IV sweep → Save CSV / XLSX / PNG → Wait → Repeat
@@ -33,8 +86,21 @@ Read temperature → IV sweep → Save CSV / XLSX / PNG → Wait → Repeat
 pip install -r requirements.txt
 ```
 
-> **No `pyvisa-py` needed.** PyVISA finds the Keysight VISA backend
-> automatically once IO Libraries Suite is installed.
+**What each package does:**
+
+| Package | Version | Purpose |
+|---|---|---|
+| `pyvisa` | ≥ 1.13 | Python wrapper that calls into the Keysight VISA backend to send GPIB commands to the B1500A and temperature controller |
+| `numpy` | ≥ 1.24 | Generates the voltage sweep array; stores and processes current readings as numeric arrays |
+| `matplotlib` | ≥ 3.7 | Draws the two-panel IV plot (linear + semi-log) and saves it as a PNG |
+| `pandas` | ≥ 2.0 | Builds a tidy table from the sweep data, used for CSV and Excel export |
+| `openpyxl` | ≥ 3.1 | Write engine that pandas uses to create the `.xlsx` Excel workbook |
+
+> **Important — two-layer VISA setup:**  
+> `pyvisa` (installed via pip) is the **Python API layer**.  
+> Keysight IO Libraries Suite (installed separately from Keysight's website) is the **hardware backend** — the driver DLL that physically talks to the GPIB interface.  
+> Both must be installed. `pyvisa` alone cannot communicate with hardware; IO Libraries Suite alone provides no Python API.  
+> No `pyvisa-py` is needed — PyVISA auto-detects the Keysight backend once IO Libraries Suite is installed.
 
 ---
 
@@ -114,6 +180,92 @@ iv_results/
   Diode_A1_cycle002_290.1K_20260608_121012_IV.csv
   ...
 ```
+
+**File name format:**  
+`<sample>_cycle<NNN>_<T>K_<YYYYMMDD>_<HHMMSS>_IV.<ext>`
+
+| Part | Example | Meaning |
+|---|---|---|
+| `sample` | `Diode_A1` | Value of `--sample` |
+| `cycleNNN` | `cycle001` | Cycle number, zero-padded to 3 digits |
+| `<T>K` | `295.3K` | Temperature in Kelvin at cycle start |
+| datetime | `20260608_120000` | Date and time the cycle started |
+| ext | `.csv` / `.xlsx` / `.png` | File type |
+
+---
+
+### Sample CSV file content
+
+Each CSV has a metadata header (lines starting with `#`), a column name row,
+a units row, and then one data row per voltage step.
+
+```csv
+# Instrument: Keysight B1500A
+# Measurement: IV Sweep
+# Temperature (K): 295.3
+# Sample: Diode_A1
+# Cycle: 1
+# Terminal+ CH1: SMU1 (force V, measure I)
+# Terminal- CH2: SMU2 (grounded reference)
+# Compliance(A): 0.1
+# V_Start (V): -0.5
+# V_Stop (V): 0.5
+# V_Step (V): 0.01
+# Points: 101
+# Timestamp: 2026-06-08 12:00:00
+Voltage(V),Current(A),Current(mA)
+V,A,mA
+-0.500000,-9.999231e-10,-9.999231e-07
+-0.490000,-9.931842e-10,-9.931842e-07
+-0.480000,-9.864325e-10,-9.864325e-07
+...
+0.000000,1.023400e-09,1.023400e-06
+...
+0.480000,3.421870e-04,3.421870e-01
+0.490000,4.187620e-04,4.187620e-01
+0.500000,5.123450e-04,5.123450e-01
+```
+
+- **Row 1–13** (`# …`): metadata — Origin treats these as comment rows.
+- **Row 14** (`Voltage(V),Current(A),Current(mA)`): column long names.
+- **Row 15** (`V,A,mA`): units row — Origin maps these to column units automatically.
+- **Row 16 onward**: one measurement per voltage step (101 rows total for the default −0.5 V to +0.5 V sweep).
+- Currents in the forward-bias region (positive V) grow exponentially; in reverse bias they are near the leakage floor (~1 nA for a silicon diode).
+
+---
+
+### Sample XLSX file content
+
+The Excel workbook contains a single sheet called **`IV_Data`** with three
+columns and 101 data rows (plus a header row):
+
+| Voltage (V) | Current (A)  | Current (mA) |
+|-------------|--------------|--------------|
+| −0.500000   | −9.999231e-10| −9.999231e-07|
+| −0.490000   | −9.931842e-10| −9.931842e-07|
+| …           | …            | …            |
+| 0.500000    | 5.123450e-04 | 5.123450e-01 |
+
+The XLSX does not include the `#` metadata header rows — it is a clean
+data-only table, making it easy to chart directly in Excel or import into
+Origin.
+
+---
+
+### Sample PNG plot
+
+Each PNG contains a **two-panel figure** saved at 150 DPI:
+
+| Panel | X axis | Y axis | Scale |
+|---|---|---|---|
+| Left | Voltage (V) | Current (mA) | Linear |
+| Right | Voltage (V) | \|Current\| (A) | Semi-log (log₁₀) |
+
+The linear panel shows the classic diode S-curve; the semi-log panel makes
+the exponential forward current and the flat reverse leakage floor both
+clearly visible in one plot.
+
+---
 
 ### Origin import tip (CSV)
 1. **File → Import → Single ASCII**  
