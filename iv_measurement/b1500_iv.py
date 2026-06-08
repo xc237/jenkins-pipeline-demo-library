@@ -48,7 +48,14 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-DEFAULT_VISA_ADDRESS = "GPIB1::17::INSTR"   # Keysight GPIB cable, board 1, address 17
+DEFAULT_VISA_ADDRESS  = "GPIB1::17::INSTR"   # Keysight GPIB cable, board 1, address 17
+
+# Temperature controller (change address and query command to match your model)
+# Lakeshore 331/335/336 example: GPIB0::12::INSTR, query = "KRDG? A"
+# Oxford ITC example:            GPIB0::24::INSTR, query = "R1"
+DEFAULT_TEMP_ADDRESS  = "GPIB0::12::INSTR"
+DEFAULT_TEMP_CMD      = "KRDG? A"   # Lakeshore: read Channel-A temperature (Kelvin)
+
 CHANNEL_PLUS  = 1   # SMU1 – Terminal+ (force voltage, measure current)
 CHANNEL_MINUS = 2   # SMU2 – Terminal− (grounded reference)
 
@@ -59,9 +66,13 @@ V_STEP         =  0.01   # V
 COMPLIANCE_I   = 0.1     # A  (100 mA)
 COMPLIANCE_V   = 2.0     # V  (used when sourcing current)
 
-INTEGRATION_TIME = "MED"  # SHORT | MED | LONG  (affects accuracy/speed)
-HOLD_TIME        = 0.000  # seconds before sweep starts
-STEP_DELAY       = 0.000  # seconds between each sweep step
+INTEGRATION_TIME       = "MED"  # SHORT | MED | LONG  (affects accuracy/speed)
+HOLD_TIME              = 0.000  # seconds before sweep starts
+STEP_DELAY             = 0.000  # seconds between each sweep step
+
+# Temperature-loop defaults (overridable via CLI)
+DEFAULT_CYCLES         = 0      # 0 = run indefinitely until Ctrl-C
+DEFAULT_INTERVAL_MIN   = 10     # minutes between consecutive IV measurements
 
 
 # ---------------------------------------------------------------------------
@@ -250,15 +261,84 @@ class B1500Controller:
 
 
 # ---------------------------------------------------------------------------
-# Plotting
+# TemperatureController
 # ---------------------------------------------------------------------------
+class TemperatureController:
+    """
+    Generic VISA temperature controller wrapper.
+
+    Works with any instrument that returns a numeric temperature when
+    queried with a single SCPI/ASCII command (Lakeshore, Oxford ITC, etc.).
+
+    Parameters
+    ----------
+    visa_address : str
+        VISA resource string for the temperature controller.
+    query_cmd : str
+        Command sent to read temperature, e.g. "KRDG? A" (Lakeshore) or "R1" (Oxford ITC).
+    simulate : bool
+        If True, return a synthetic temperature that drifts slowly over time.
+    """
+
+    def __init__(
+        self,
+        visa_address: str = DEFAULT_TEMP_ADDRESS,
+        query_cmd: str    = DEFAULT_TEMP_CMD,
+        simulate: bool    = False,
+    ):
+        self.visa_address = visa_address
+        self.query_cmd    = query_cmd
+        self.simulate     = simulate
+        self._instrument  = None
+        self._sim_start   = time.monotonic()
+
+    def connect(self):
+        if self.simulate:
+            print("[SIM] Temperature controller connected (simulation mode)")
+            return
+        if not PYVISA_AVAILABLE:
+            raise ImportError("pyvisa is not installed.")
+        rm = pyvisa.ResourceManager()
+        self._instrument = rm.open_resource(self.visa_address)
+        self._instrument.timeout = 10_000
+        self._instrument.read_termination  = "\n"
+        self._instrument.write_termination = "\n"
+        print(f"[OK] Temperature controller connected: {self.visa_address}")
+
+    def disconnect(self):
+        if self._instrument:
+            self._instrument.close()
+            self._instrument = None
+        if self.simulate:
+            print("[SIM] Temperature controller disconnected")
+
+    def read_temperature(self) -> float:
+        """Return current temperature in Kelvin (or the instrument's native unit)."""
+        if self.simulate:
+            # Slowly drift from 300 K down – realistic cryostat cool-down
+            elapsed_min = (time.monotonic() - self._sim_start) / 60.0
+            temp = max(77.0, 300.0 - elapsed_min * 5.0)
+            temp += np.random.default_rng().normal(0, 0.05)   # ±0.05 K noise
+            return round(temp, 3)
+
+        raw = self._instrument.query(self.query_cmd).strip()
+        # Most controllers return a bare float; strip any unit suffix just in case
+        try:
+            return float(raw.split()[0])
+        except ValueError:
+            raise RuntimeError(
+                f"Could not parse temperature from response: {raw!r}"
+            )
+
+
+
 def plot_iv(
     voltages: np.ndarray,
     currents: np.ndarray,
     title: str = "IV Characteristic",
     output_path: str | None = None,
 ):
-    """Plot drain current vs drain voltage and optionally save to file."""
+    """Plot device current vs voltage and optionally save to file."""
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
     fig.suptitle(title, fontsize=14)
 
@@ -314,19 +394,21 @@ def save_data(
     ...
 
     Origin import tip: File → Import → Single ASCII
-    Set delimiter = comma, mark row 1 as "Comments", row 2 as "Long Names".
+    Set delimiter = comma, mark comment rows as "Comments",
+    the Long-Name row as "Long Names", and the Units row as "Units".
     """
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     meta = {
-        "Instrument":  "Keysight B1500A",
-        "Measurement": "IV Sweep",
-        "Drain (CH1)": "SMU1",
-        "Source (CH2)":"SMU2 (grounded)",
-        "V_Start (V)": str(voltages[0]),
-        "V_Stop (V)":  str(voltages[-1]),
-        "V_Step (V)":  str(round(voltages[1] - voltages[0], 6)),
-        "Points":      str(len(voltages)),
-        "Timestamp":   timestamp,
+        "Instrument":    "Keysight B1500A",
+        "Measurement":   "IV Sweep",
+        "Terminal+ CH1": "SMU1 (force V, measure I)",
+        "Terminal- CH2": "SMU2 (grounded reference)",
+        "Compliance(A)": str(COMPLIANCE_I),
+        "V_Start (V)":   str(voltages[0]),
+        "V_Stop (V)":    str(voltages[-1]),
+        "V_Step (V)":    str(round(voltages[1] - voltages[0], 6)),
+        "Points":        str(len(voltages)),
+        "Timestamp":     timestamp,
     }
     if metadata:
         meta.update(metadata)
@@ -370,70 +452,142 @@ def save_data_xlsx(
 
 
 # ---------------------------------------------------------------------------
-# Main measurement routine
+# Main measurement routine  (temperature-loop)
 # ---------------------------------------------------------------------------
 def run_iv_measurement(
-    visa_address: str = DEFAULT_VISA_ADDRESS,
-    simulate: bool = False,
-    output_dir: str = ".",
-    sample_name: str = "DUT",
+    visa_address:   str   = DEFAULT_VISA_ADDRESS,
+    temp_address:   str   = DEFAULT_TEMP_ADDRESS,
+    temp_cmd:       str   = DEFAULT_TEMP_CMD,
+    simulate:       bool  = False,
+    output_dir:     str   = "iv_results",
+    sample_name:    str   = "DUT",
+    cycles:         int   = DEFAULT_CYCLES,
+    interval_min:   float = DEFAULT_INTERVAL_MIN,
 ):
     """
-    Full end-to-end IV measurement workflow.
+    Temperature-dependent IV measurement loop.
+
+    Workflow (repeated `cycles` times, or indefinitely if cycles=0)
+    ---------------------------------------------------------------
+    1. Read temperature from controller
+    2. Run IV sweep on B1500 (Terminal+ = CH1, Terminal− = CH2)
+    3. Save CSV, XLSX, and PNG tagged with temperature and cycle number
+    4. Wait `interval_min` minutes
+    5. Go to step 1
 
     Parameters
     ----------
-    visa_address : str
-        VISA resource string, e.g. "GPIB0::17::INSTR" or
-        "USB0::0x0957::0x0B0B::MY12345678::INSTR"
-    simulate : bool
-        If True, generate synthetic data instead of talking to hardware.
-    output_dir : str
-        Directory for output files (created if absent).
-    sample_name : str
-        Label used in file names and plot titles.
+    visa_address  : VISA address of the B1500A
+    temp_address  : VISA address of the temperature controller
+    temp_cmd      : SCPI query command for temperature (e.g. "KRDG? A")
+    simulate      : If True, use synthetic data (no hardware needed)
+    output_dir    : Directory for all output files
+    sample_name   : Label for file names and plot titles
+    cycles        : Number of IV cycles to run (0 = run until Ctrl-C)
+    interval_min  : Minutes to wait between cycles
     """
     os.makedirs(output_dir, exist_ok=True)
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    base_name = os.path.join(output_dir, f"{sample_name}_{timestamp}")
+    interval_sec = interval_min * 60.0
 
-    controller = B1500Controller(visa_address, simulate=simulate)
+    # ---- Connect instruments ----
+    b1500 = B1500Controller(visa_address, simulate=simulate)
+    tc    = TemperatureController(temp_address, temp_cmd, simulate=simulate)
 
+    b1500.connect()
+    b1500.reset()
+    b1500.initialise_channels()
+    tc.connect()
+
+    print(
+        f"\n{'='*60}\n"
+        f"  Temperature-dependent IV measurement\n"
+        f"  Sample    : {sample_name}\n"
+        f"  Cycles    : {'∞ (Ctrl-C to stop)' if cycles == 0 else cycles}\n"
+        f"  Interval  : {interval_min} min\n"
+        f"  Output    : {output_dir}/\n"
+        f"{'='*60}\n"
+    )
+
+    cycle_num = 0
     try:
-        # ---- Setup ----
-        controller.connect()
-        controller.reset()
-        controller.initialise_channels()
+        while True:
+            cycle_num += 1
+            if cycles > 0 and cycle_num > cycles:
+                break
 
-        # ---- Sweep ----
-        print(
-            f"\nStarting IV sweep: {V_START} V → {V_STOP} V, "
-            f"step {V_STEP} V  ({round((V_STOP - V_START) / V_STEP) + 1} points)"
-        )
-        voltages, currents = controller.iv_sweep(V_START, V_STOP, V_STEP)
-        print(f"  Min current: {currents.min():.4e} A")
-        print(f"  Max current: {currents.max():.4e} A")
+            print(f"\n--- Cycle {cycle_num}"
+                  + (f"/{cycles}" if cycles > 0 else "") + " ---")
+
+            # Step 1 – Read temperature
+            temperature = tc.read_temperature()
+            print(f"  Temperature : {temperature:.3f} K")
+
+            # Step 2 – IV sweep
+            print(
+                f"  IV sweep    : {V_START} V → {V_STOP} V, "
+                f"step {V_STEP} V"
+            )
+            voltages, currents = b1500.iv_sweep(V_START, V_STOP, V_STEP)
+            print(f"  I_min       : {currents.min():.4e} A")
+            print(f"  I_max       : {currents.max():.4e} A")
+
+            # Step 3 – Save data
+            ts        = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            t_tag     = f"{temperature:.1f}K"
+            base_name = os.path.join(
+                output_dir,
+                f"{sample_name}_cycle{cycle_num:03d}_{t_tag}_{ts}"
+            )
+
+            extra_meta = {
+                "Sample":        sample_name,
+                "Cycle":         str(cycle_num),
+                "Temperature(K)": f"{temperature:.3f}",
+            }
+
+            csv_path  = base_name + "_IV.csv"
+            plot_path = base_name + "_IV.png"
+            save_data(voltages, currents, csv_path, metadata=extra_meta)
+
+            try:
+                xlsx_path = base_name + "_IV.xlsx"
+                save_data_xlsx(voltages, currents, xlsx_path)
+            except ImportError:
+                print("[WARN] openpyxl not installed – skipping Excel export")
+
+            title = (
+                f"IV Characteristic – {sample_name}  "
+                f"(Cycle {cycle_num}, T = {temperature:.1f} K)"
+            )
+            plot_iv(voltages, currents, title=title, output_path=plot_path)
+
+            # Step 4 – Wait before next cycle (skip after last cycle)
+            if cycles == 0 or cycle_num < cycles:
+                print(
+                    f"\n  Waiting {interval_min} min until next cycle "
+                    f"(Ctrl-C to stop)…"
+                )
+                _interruptible_sleep(interval_sec)
+
+    except KeyboardInterrupt:
+        print("\n[INFO] Measurement loop interrupted by user.")
 
     finally:
-        controller.disconnect()
+        b1500.disconnect()
+        tc.disconnect()
 
-    # ---- Save data ----
-    csv_path  = base_name + "_IV.csv"
-    plot_path = base_name + "_IV.png"
-    save_data(voltages, currents, csv_path, metadata={"Sample": sample_name})
+    print(f"\n[DONE] {cycle_num} cycle(s) completed. "
+          f"All files saved in: {output_dir}/")
 
-    try:
-        xlsx_path = base_name + "_IV.xlsx"
-        save_data_xlsx(voltages, currents, xlsx_path)
-    except ImportError:
-        print("[WARN] openpyxl not installed – skipping Excel export")
 
-    # ---- Plot ----
-    title = f"IV Characteristic – {sample_name}"
-    plot_iv(voltages, currents, title=title, output_path=plot_path)
-
-    print(f"\n[DONE] All output files in: {output_dir}/")
-    return voltages, currents
+def _interruptible_sleep(seconds: float, tick: float = 5.0):
+    """Sleep for `seconds` total, waking every `tick` s to allow KeyboardInterrupt."""
+    end = time.monotonic() + seconds
+    while True:
+        remaining = end - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(tick, remaining))
 
 
 # ---------------------------------------------------------------------------
@@ -441,27 +595,52 @@ def run_iv_measurement(
 # ---------------------------------------------------------------------------
 def _parse_args():
     parser = argparse.ArgumentParser(
-        description="B1500 IV Measurement – drain voltage sweep"
+        description=(
+            "B1500 temperature-dependent IV measurement: "
+            "read T → IV sweep → save → wait → repeat"
+        )
     )
     parser.add_argument(
         "--visa",
         default=DEFAULT_VISA_ADDRESS,
-        help=f"VISA resource address (default: {DEFAULT_VISA_ADDRESS})",
+        help=f"VISA address of the B1500A (default: {DEFAULT_VISA_ADDRESS})",
+    )
+    parser.add_argument(
+        "--temp-visa",
+        default=DEFAULT_TEMP_ADDRESS,
+        help=f"VISA address of the temperature controller (default: {DEFAULT_TEMP_ADDRESS})",
+    )
+    parser.add_argument(
+        "--temp-cmd",
+        default=DEFAULT_TEMP_CMD,
+        help=f"Query command to read temperature (default: '{DEFAULT_TEMP_CMD}')",
     )
     parser.add_argument(
         "--simulate",
         action="store_true",
-        help="Run in simulation mode (no instrument required)",
+        help="Run in simulation mode (no hardware required)",
     )
     parser.add_argument(
         "--output-dir",
         default="iv_results",
-        help="Output directory for CSV, PNG, and XLSX files (default: iv_results)",
+        help="Output directory for all files (default: iv_results)",
     )
     parser.add_argument(
         "--sample",
         default="DUT",
         help="Sample / device-under-test name (used in file names)",
+    )
+    parser.add_argument(
+        "--cycles",
+        type=int,
+        default=DEFAULT_CYCLES,
+        help="Number of IV cycles to run (default: 0 = run until Ctrl-C)",
+    )
+    parser.add_argument(
+        "--interval",
+        type=float,
+        default=DEFAULT_INTERVAL_MIN,
+        help=f"Minutes between consecutive IV measurements (default: {DEFAULT_INTERVAL_MIN})",
     )
     return parser.parse_args()
 
@@ -469,8 +648,12 @@ def _parse_args():
 if __name__ == "__main__":
     args = _parse_args()
     run_iv_measurement(
-        visa_address=args.visa,
-        simulate=args.simulate,
-        output_dir=args.output_dir,
-        sample_name=args.sample,
+        visa_address  = args.visa,
+        temp_address  = args.temp_visa,
+        temp_cmd      = args.temp_cmd,
+        simulate      = args.simulate,
+        output_dir    = args.output_dir,
+        sample_name   = args.sample,
+        cycles        = args.cycles,
+        interval_min  = args.interval,
     )
