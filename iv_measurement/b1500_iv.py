@@ -1,22 +1,26 @@
 """
 B1500 Semiconductor Parameter Analyzer – IV Measurement Script
 ================================================================
-Hardware:  Keysight / Agilent B1500A
+Hardware:  Keysight B1500A
+Interface: GPIB via Keysight IO Libraries Suite (GPIB1::17::INSTR)
 Setup:     SMU1 (Channel 1) → Drain
            SMU2 (Channel 2) → Source (grounded)
 
 Sweep:     Drain voltage  -0.5 V → +0.5 V, step 0.01 V (101 points)
 Output:    • Matplotlib IV plot (PNG)
            • CSV data file (importable by Origin, Excel, …)
+           • Excel workbook (.xlsx)
 
 Requirements (install with `pip install -r requirements.txt`):
-    pyvisa, pyvisa-py or NI-VISA backend, numpy, matplotlib, pandas
+    pyvisa, Keysight IO Libraries Suite (provides the VISA backend),
+    numpy, matplotlib, pandas, openpyxl
 
 Usage
 -----
-  python b1500_iv.py                      # real hardware
-  python b1500_iv.py --simulate           # no hardware needed
-  python b1500_iv.py --visa "GPIB0::17::INSTR"
+  python b1500_iv.py                              # real hardware (GPIB1::17)
+  python b1500_iv.py --simulate                   # no hardware needed
+  python b1500_iv.py --visa "GPIB1::17::INSTR"    # explicit address
+  python b1500_iv.py --sample "MyDiode"           # custom device label
 """
 
 import argparse
@@ -43,7 +47,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-DEFAULT_VISA_ADDRESS = "GPIB0::17::INSTR"   # change to match your setup
+DEFAULT_VISA_ADDRESS = "GPIB1::17::INSTR"   # Keysight GPIB cable, board 1, address 17
 CHANNEL_DRAIN  = 1   # SMU1 – drain
 CHANNEL_SOURCE = 2   # SMU2 – source (forced to 0 V)
 
